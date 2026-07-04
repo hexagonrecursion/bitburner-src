@@ -20,9 +20,8 @@ import { Router } from "../ui/GameRoot";
 import { Page } from "../ui/Router";
 import React from "react";
 import { Link as MuiLink } from "@mui/material";
-import { GetServer } from "../Server/AllServers";
-import { DarknetServer } from "../Server/DarknetServer";
-import { SpecialServers } from "../Server/data/SpecialServers";
+import { checkDarknetServer } from "../DarkNet/effects/offlineServerHandling";
+import type { BaseServer } from "../Server/BaseServer";
 
 /** Converts the provided value to a string and ensures it satisfies the alias condition, throwing if it is not  */
 export function parseAsAlias(ctx: NetscriptContext, argName: string, v: unknown): string {
@@ -37,28 +36,13 @@ export function parseAsAlias(ctx: NetscriptContext, argName: string, v: unknown)
   return v;
 }
 
-function isServerLinkAllowed(hostname: string): boolean {
-  const server = GetServer(hostname);
-  if (server == null) {
-    return false;
-  }
-  if (server instanceof DarknetServer && server.hostname !== SpecialServers.DarkWeb) {
-    return server.backdoorInstalled;
-  }
-  return server.serversOnNetwork.length > 0;
-}
-
-function handleServerLinkClick(hostname: string, event: React.MouseEvent<HTMLAnchorElement>): void {
+function handleServerLinkClick(ip: string, event: React.MouseEvent<HTMLAnchorElement>): void {
   const { nativeEvent } = event;
   if (!(nativeEvent instanceof Event) || !nativeEvent.isTrusted) {
     Terminal.error("Links created by ns.ui.createServerLink() can only be used manually.");
     return;
   }
-  if (!isServerLinkAllowed(hostname)) {
-    Terminal.error("Invalid server. Connection failed.");
-    return;
-  }
-  Terminal.connectToServer(hostname);
+  Terminal.connectToServer(ip);
 }
 
 export function NetscriptUserInterface(): InternalAPI<IUserInterface> {
@@ -308,10 +292,20 @@ export function NetscriptUserInterface(): InternalAPI<IUserInterface> {
       Router.toPage(Page.CustomPage, { content: wrapUserNode(_node) });
     },
 
-    createServerLink: (ctx) => (_hostname, _linkText?) => {
+    createServerLink: (ctx) => (_hostname?, _linkText?) => {
       const hostname = helpers.string(ctx, "hostname", _hostname);
+      const hostnameCheck = checkDarknetServer(ctx, hostname, {
+        allowNonDarknet: true,
+        requireDirectConnection: true,
+        backdoorBypasses: true,
+        requireSession: true,
+      });
+      if (!hostnameCheck.success) {
+        throw errorMessage(ctx, hostnameCheck.message);
+      }
+      const server: BaseServer = hostnameCheck.server;
       const linkText = _linkText == null ? hostname : helpers.string(ctx, "linkText", _linkText);
-      return <MuiLink onClick={(event) => handleServerLinkClick(hostname, event)}>{linkText}</MuiLink>;
+      return <MuiLink onClick={(event) => handleServerLinkClick(server.ip, event)}>{linkText}</MuiLink>;
     },
   };
 }
